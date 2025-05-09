@@ -31,10 +31,9 @@ enum DisplayableListItem: Identifiable {
 struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var safeAreaTop: CGFloat = 0
-    @State private var searchText: String = "" // 1. State for Search Text
     
-    // RENAMED: This is the master list of all items
-    @State private var sourceDisplayItems: [DisplayableListItem] = [
+    // UPDATED: Sample Data using DisplayableListItem
+    @State private var displayItems: [DisplayableListItem] = [
         .dateSeparator("Earlier Today"),
         .note(NoteItem(title: "Meeting Recap", dateString: "10:30 AM", iconName: "doc.text.fill")),
         .note(NoteItem(title: "Call John", dateString: "2:00 PM", iconName: "phone.fill")),
@@ -45,23 +44,6 @@ struct ContentView: View {
         .dateSeparator("Last Week"),
         .note(NoteItem(title: "Book Flight", dateString: "Morning", iconName: "airplane"))
     ]
-    // User removed older notes mapping, respected.
-
-    // 4. Computed property for filtering
-    var itemsToDisplay: [DisplayableListItem] {
-        if searchText.isEmpty {
-            return sourceDisplayItems
-        } else {
-            // When searching, filter notes and hide date separators
-            return sourceDisplayItems.compactMap { item in
-                if case .note(let note) = item, 
-                   note.title.localizedCaseInsensitiveContains(searchText) {
-                    return .note(note) // Keep matching notes
-                }
-                return nil // Discard non-matching notes and all date separators
-            }
-        }
-    }
 
     // Constants for the new design
     private let largeScrollableTitleFontSize: CGFloat = 34
@@ -111,49 +93,17 @@ struct ContentView: View {
                                 }
                             )
 
-                        // In-ScrollView Heading
                         Text("My Notes")
                             .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
                             .padding(.top, safeAreaTop + 20)
                             .padding(.bottom, 15)
                             .opacity(scrollViewHeadingOpacity)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            // Make sure heading text color is appropriate for gray background
                             .foregroundColor(Color(.label))
 
-                        // 2. Search Bar UI
-                        HStack {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundColor(Color(.secondaryLabel))
-                            TextField("Search Notes", text: $searchText)
-                                .foregroundColor(Color(.label))
-                                .submitLabel(.search) // For keyboard return key
-                            if !searchText.isEmpty {
-                                Button {
-                                    searchText = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(Color(.secondaryLabel))
-                                }
-                            }
-                        }
-                        .padding(.vertical, 10)
-                        .padding(.horizontal, 12)
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                        // Search bar itself does not need additional horizontal padding here
-                        // as the parent VStack of the ScrollView has .padding(.horizontal)
-                        
-                        // 3. Padding below search bar
-                        // This will apply padding if itemsToDisplay is not empty
-                        // and searchText is empty (so separators are visible) or if there are search results.
-                        if !itemsToDisplay.isEmpty {
-                             Rectangle()
-                                .fill(Color.clear)
-                                .frame(height: searchText.isEmpty ? 30 : 15) // 30px when not searching, 15px when searching to first result
-                        }
-
-                        // UPDATED: ForEach loop now uses itemsToDisplay
-                        ForEach(itemsToDisplay) { item in
+                        // UPDATED: ForEach loop and conditional rendering
+                        ForEach(displayItems) { item in
                             switch item {
                             case .dateSeparator(let text):
                                 Text(text)
@@ -168,9 +118,9 @@ struct ContentView: View {
                                 HStack(spacing: 15) {
                                     // Icon Container - Size Adjusted
                                     ZStack {
-                                        RoundedRectangle(cornerRadius: 10)
+                                        RoundedRectangle(cornerRadius: 10) // Slightly smaller corner radius
                                             .fill(Color.appIconBackground)
-                                            .frame(width: 35, height: 35) // User's size change respected
+                                            .frame(width: 35, height: 35) // ADJUSTED SIZE
                                         Image(systemName: note.iconName)
                                             .foregroundColor(.white.opacity(0.8))
                                             .font(.system(size: 20, weight: .medium)) // Slightly smaller icon font
