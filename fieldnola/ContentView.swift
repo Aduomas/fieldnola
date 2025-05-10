@@ -1,5 +1,91 @@
 import SwiftUI
 
+// Minimal attributes structure for Live Activity support
+#if canImport(ActivityKit)
+import ActivityKit
+
+// Define a local copy of the attributes for the main app
+struct LiveRecordingAttributes: ActivityAttributes {
+    public struct ContentState: Codable, Hashable {
+        var duration: TimeInterval
+        var isRecording: Bool
+        var isPaused: Bool
+    }
+    
+    var title: String
+}
+
+// LiveActivity Manager
+class LiveActivityManager {
+    static let shared = LiveActivityManager()
+    private var recordingActivity: Activity<LiveRecordingAttributes>? = nil
+    
+    private init() {}
+    
+    var isLiveActivitySupported: Bool {
+        return ActivityAuthorizationInfo().areActivitiesEnabled
+    }
+    
+    func startRecordingActivity(title: String) {
+        guard isLiveActivitySupported else { return }
+        
+        do {
+            let attributes = LiveRecordingAttributes(title: title)
+            let initialContentState = LiveRecordingAttributes.ContentState(
+                duration: 0,
+                isRecording: true,
+                isPaused: false
+            )
+            
+            let activity = try Activity.request(
+                attributes: attributes,
+                content: .init(state: initialContentState, staleDate: nil)
+            )
+            
+            self.recordingActivity = activity
+            print("Started recording LiveActivity with ID: \(activity.id)")
+        } catch {
+            print("Error starting LiveActivity: \(error.localizedDescription)")
+        }
+    }
+    
+    func updateRecordingActivity(duration: TimeInterval, isPaused: Bool) {
+        guard let activity = recordingActivity else { return }
+        
+        Task {
+            let updatedContentState = LiveRecordingAttributes.ContentState(
+                duration: duration,
+                isRecording: true,
+                isPaused: isPaused
+            )
+            
+            await activity.update(
+                ActivityContent(state: updatedContentState, staleDate: nil)
+            )
+        }
+    }
+    
+    func endRecordingActivity() {
+        guard let activity = recordingActivity else { return }
+        
+        Task {
+            let finalContentState = LiveRecordingAttributes.ContentState(
+                duration: 0,
+                isRecording: false,
+                isPaused: false
+            )
+            
+            await activity.end(
+                ActivityContent(state: finalContentState, staleDate: nil),
+                dismissalPolicy: .immediate
+            )
+            
+            recordingActivity = nil
+        }
+    }
+}
+#endif
+
 struct ContentView: View {
     @State private var safeAreaTop: CGFloat = 0
     @State private var displayItems: [DisplayableListItem] = []
@@ -9,6 +95,13 @@ struct ContentView: View {
     @State private var searchBarHeight: CGFloat = 0
     @State private var currentDateSeparator: String = ""
     @State private var dateSeparatorPositions: [String: CGFloat] = [:]
+    
+    // Recording state variables
+    @State private var isRecording: Bool = false
+    @State private var isPaused: Bool = false
+    @State private var recordingDuration: Double = 0
+    @State private var recordingTimer: Timer? = nil
+    @State private var showRecordingSheet: Bool = false
 
     private let largeScrollableTitleFontSize: CGFloat = 34
     private let searchBarScrollThreshold: CGFloat = 40
@@ -55,179 +148,338 @@ struct ContentView: View {
     }
     
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .top) {
-                Color(.systemGray6)
-                    .edgesIgnoringSafeArea(.all)
+        ZStack {
+            NavigationStack {
+                ZStack(alignment: .top) {
+                    Color(.systemGray6)
+                        .edgesIgnoringSafeArea(.all)
 
-                ScrollView {
-                    ScrollDetector { offset in
-                        scrollOffset = offset
-                        updateCurrentDateSeparator()
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 10) {
-                        // Spacer to push content down by header height
-                        Color.clear
-                            .frame(height: calculateHeaderOffset())
-                            .frame(maxWidth: .infinity)
-                        
-                        // Search bar (scrolls with content)
-                        HStack {
-                            Image(systemName: "magnifyingglass")
-                                .foregroundColor(Color(.systemGray2))
-                                .padding(.leading, 8)
-                            
-                            ZStack(alignment: .leading) {
-                                if searchText.isEmpty {
-                                    Text("Search")
-                                        .foregroundColor(Color(.systemGray2))
-                                }
-                                
-                                TextField("", text: $searchText)
-                                    .foregroundColor(Color(.label))
-                                    .accentColor(Color(.systemGray4))
-                            }
-                            .padding(10)
-                            
-                            if !searchText.isEmpty {
-                                Button(action: {
-                                    searchText = ""
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .foregroundColor(Color(.systemGray4))
-                                }
-                                .padding(.trailing, 8)
-                            }
+                    ScrollView {
+                        ScrollDetector { offset in
+                            scrollOffset = offset
+                            updateCurrentDateSeparator()
                         }
-                        .background(Color(.systemGray5))
-                        .cornerRadius(10)
-                        .padding(.bottom, 15)
-                        .background(
-                            GeometryReader { geo -> Color in
-                                DispatchQueue.main.async {
-                                    searchBarHeight = geo.size.height
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            // Spacer to push content down by header height
+                            Color.clear
+                                .frame(height: calculateHeaderOffset())
+                                .frame(maxWidth: .infinity)
+                            
+                            // Search bar (scrolls with content)
+                            HStack {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundColor(Color(.systemGray2))
+                                    .padding(.leading, 8)
+                                
+                                ZStack(alignment: .leading) {
+                                    if searchText.isEmpty {
+                                        Text("Search")
+                                            .foregroundColor(Color(.systemGray2))
+                                    }
+                                    
+                                    TextField("", text: $searchText)
+                                        .foregroundColor(Color(.label))
+                                        .accentColor(Color(.systemGray4))
                                 }
-                                return Color.clear
+                                .padding(10)
+                                
+                                if !searchText.isEmpty {
+                                    Button(action: {
+                                        searchText = ""
+                                    }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundColor(Color(.systemGray4))
+                                    }
+                                    .padding(.trailing, 8)
+                                }
                             }
-                        )
+                            .background(Color(.systemGray5))
+                            .cornerRadius(10)
+                            .padding(.bottom, 15)
+                            .background(
+                                GeometryReader { geo -> Color in
+                                    DispatchQueue.main.async {
+                                        searchBarHeight = geo.size.height
+                                    }
+                                    return Color.clear
+                                }
+                            )
 
-                        if filteredItems.isEmpty && !searchText.isEmpty {
-                            VStack(spacing: 20) {
-                                Image(systemName: "text.magnifyingglass")
-                                    .font(.system(size: 50))
-                                    .foregroundColor(.gray)
-                                
-                                Text("No results found")
-                                    .font(.title3)
-                                    .foregroundColor(.gray)
-                                
-                                Text("Try a different search term")
-                                    .font(.subheadline)
-                                    .foregroundColor(.gray)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 50)
-                        } else {
-                            ForEach(filteredItems) { item in
-                                switch item {
-                                case .dateSeparator(let text):
-                                    DateSeparatorView(text: text)
-                                        .background(
-                                            GeometryReader { geo -> Color in
-                                                let frame = geo.frame(in: .global)
-                                                DispatchQueue.main.async {
-                                                    dateSeparatorPositions[text] = frame.minY
+                            if filteredItems.isEmpty && !searchText.isEmpty {
+                                VStack(spacing: 20) {
+                                    Image(systemName: "text.magnifyingglass")
+                                        .font(.system(size: 50))
+                                        .foregroundColor(.gray)
+                                    
+                                    Text("No results found")
+                                        .font(.title3)
+                                        .foregroundColor(.gray)
+                                    
+                                    Text("Try a different search term")
+                                        .font(.subheadline)
+                                        .foregroundColor(.gray)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 50)
+                            } else {
+                                ForEach(filteredItems) { item in
+                                    switch item {
+                                    case .dateSeparator(let text):
+                                        DateSeparatorView(text: text)
+                                            .background(
+                                                GeometryReader { geo -> Color in
+                                                    let frame = geo.frame(in: .global)
+                                                    DispatchQueue.main.async {
+                                                        dateSeparatorPositions[text] = frame.minY
+                                                    }
+                                                    return Color.clear
                                                 }
-                                                return Color.clear
-                                            }
-                                        )
-                                case .note(let note):
-                                    NoteCardView(note: note)
+                                            )
+                                    case .note(let note):
+                                        NoteCardView(note: note)
+                                    }
                                 }
                             }
                         }
-                    }
-                    .padding(.horizontal)
-                }
-                
-                // Fixed overlay header
-                VStack(alignment: .leading, spacing: 0) {
-                    Text("My Notes")
-                        .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
-                        .foregroundColor(Color(.label))
-                        .padding(.top, safeAreaTop + 20)
                         .padding(.horizontal)
-                        .opacity(headerOpacity)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            GeometryReader { geo -> Color in
-                                DispatchQueue.main.async {
-                                    headerHeight = geo.size.height
-                                }
-                                return Color.clear
-                            }
-                        )
+                    }
                     
-                    Spacer()
-                }
-                .frame(height: headerHeight)
-                .frame(maxWidth: .infinity)
-                .offset(y: calculateTitleOffset())
-                .background(Color(.systemGray6))
-                .zIndex(3)
-                
-                // Sticky date separator
-                if headerOpacity <= 0.01 && !currentDateSeparator.isEmpty {
-                    VStack(spacing: 0) {
-                        // Add extra spacing to avoid navbar overlap
-                        Color.clear
-                            .frame(height: safeAreaTop + navBarHeight + 8)
-                        
-                        HStack {
-                            Text(currentDateSeparator)
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(Color(.darkGray))
-                                .padding(.horizontal)
-                                .padding(.vertical, 6)
-                            
-                            Spacer()
-                        }
-                        .frame(height: dateSeparatorHeight)
-                        .frame(maxWidth: .infinity)
-                        .background(Color(.systemGray6))
-                        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-                        .transition(.opacity)
-                        .id(currentDateSeparator) // Forces view recreation on change
+                    // Fixed overlay header
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("My Notes")
+                            .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
+                            .foregroundColor(Color(.label))
+                            .padding(.top, safeAreaTop + 20)
+                            .padding(.horizontal)
+                            .opacity(headerOpacity)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                GeometryReader { geo -> Color in
+                                    DispatchQueue.main.async {
+                                        headerHeight = geo.size.height
+                                    }
+                                    return Color.clear
+                                }
+                            )
                         
                         Spacer()
                     }
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .zIndex(2)
-                    .animation(.easeInOut(duration: 0.2), value: currentDateSeparator)
+                    .frame(height: headerHeight)
+                    .frame(maxWidth: .infinity)
+                    .offset(y: calculateTitleOffset())
+                    .background(Color(.systemGray6))
+                    .zIndex(3)
+                    
+                    // Sticky date separator
+                    if headerOpacity <= 0.01 && !currentDateSeparator.isEmpty {
+                        VStack(spacing: 0) {
+                            // Add extra spacing to avoid navbar overlap
+                            Color.clear
+                                .frame(height: safeAreaTop + navBarHeight + 8)
+                            
+                            HStack {
+                                Text(currentDateSeparator)
+                                    .font(.headline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(Color(.darkGray))
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 6)
+                                
+                                Spacer()
+                            }
+                            .frame(height: dateSeparatorHeight)
+                            .frame(maxWidth: .infinity)
+                            .background(Color(.systemGray6))
+                            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+                            .transition(.opacity)
+                            .id(currentDateSeparator) // Forces view recreation on change
+                            
+                            Spacer()
+                        }
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .zIndex(2)
+                        .animation(.easeInOut(duration: 0.2), value: currentDateSeparator)
+                    }
+                }
+                .navigationTitle("My Notes")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Text("My Notes")
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .opacity(navBarTitleOpacity)
+                            .animation(.easeInOut(duration: 0.2), value: scrollOffset)
+                    }
+                }
+                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .toolbarBackground(navBarVisibility, for: .navigationBar)
+                .edgesIgnoringSafeArea(.top)
+                .onAppear {
+                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                       let window = windowScene.windows.first {
+                        safeAreaTop = window.safeAreaInsets.top
+                    }
+                    generateDisplayItems()
                 }
             }
-            .navigationTitle("My Notes")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("My Notes")
-                        .font(.headline)
-                        .fontWeight(.semibold)
-                        .opacity(navBarTitleOpacity)
-                        .animation(.easeInOut(duration: 0.2), value: scrollOffset)
+            
+            // Add recording button
+            VStack {
+                Spacer()
+                
+                HStack {
+                    Spacer()
+                    
+                    // New recording button
+                    Button(action: {
+                        showRecordingSheet = true
+                        startRecording()
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "pencil")
+                                .font(.system(size: 16))
+                            Text("New")
+                                .font(.system(size: 16, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 35)
+                        .padding(.vertical, 20)
+                        .background(Color(red: 0.06, green: 0.54, blue: 0.42))
+                        .cornerRadius(30)
+                        .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
+                    }
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 20)
                 }
             }
-            .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(navBarVisibility, for: .navigationBar)
-            .edgesIgnoringSafeArea(.top)
-            .onAppear {
-                if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                   let window = windowScene.windows.first {
-                    safeAreaTop = window.safeAreaInsets.top
+            
+            // Bottom sheet for recording
+            if showRecordingSheet {
+                Color.black.opacity(0.3)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture {
+                        // Close sheet when tapping outside
+                        showRecordingSheet = false
+                        stopRecording()
+                    }
+                
+                VStack {
+                    Spacer()
+                    
+                    // Recording bottom sheet
+                    VStack(spacing: 0) {
+                        // Handle and close button
+                        HStack {
+                            Capsule()
+                                .fill(Color.gray.opacity(0.5))
+                                .frame(width: 36, height: 5)
+                                .padding(.top, 8)
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                showRecordingSheet = false
+                                stopRecording()
+                            }) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.gray)
+                                    .padding(8)
+                            }
+                        }
+                        .padding(.horizontal)
+                        
+                        // Note title
+                        Text("New note")
+                            .font(.system(size: 24, weight: .bold))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.top, 16)
+                        
+                        // Description text
+                        HStack(spacing: 8) {
+                            Image(systemName: "pencil")
+                                .foregroundColor(.gray)
+                            
+                            Text("Feel free to write notes here")
+                                .font(.system(size: 16))
+                                .foregroundColor(.gray)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.top, 6)
+                        
+                        Spacer()
+                        
+                        // Recording controls
+                        HStack(alignment: .center) {
+                            // Pause/Resume Button
+                            Button(action: {
+                                if isPaused {
+                                    resumeRecording()
+                                } else {
+                                    pauseRecording()
+                                }
+                            }) {
+                                Image(systemName: isPaused ? "play.circle.fill" : "pause.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(.gray)
+                            }
+                            .frame(width: 44, height: 44)
+                            
+                            Spacer()
+                            
+                            // Waveform and duration
+                            HStack(spacing: 6) {
+                                // Simple waveform visualization
+                                ForEach(0..<5) { i in
+                                    RoundedRectangle(cornerRadius: 1)
+                                        .fill(Color.green)
+                                        .frame(width: 3, height: CGFloat(10 + Int.random(in: 5...20)))
+                                }
+                                
+                                // Duration text
+                                Text(formatDuration(recordingDuration))
+                                    .font(.system(size: 14, weight: .medium))
+                                    .foregroundColor(.gray)
+                                    .monospacedDigit()
+                                
+                                ForEach(0..<5) { i in
+                                    RoundedRectangle(cornerRadius: 1)
+                                        .fill(Color.green)
+                                        .frame(width: 3, height: CGFloat(10 + Int.random(in: 5...20)))
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            // End Button
+                            Button(action: {
+                                showRecordingSheet = false
+                                stopRecording()
+                            }) {
+                                Text("End")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 15)
+                                    .background(Color(red: 0.06, green: 0.54, blue: 0.42))
+                                    .cornerRadius(30)
+                                    .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 30)
+                    }
+                    .background(Color.white)
+                    .cornerRadius(16)
+                    .frame(height: 350)
+                    .transition(.move(edge: .bottom))
+                    .animation(.spring(), value: showRecordingSheet)
                 }
-                generateDisplayItems()
+                .edgesIgnoringSafeArea(.bottom)
             }
         }
     }
@@ -333,6 +585,78 @@ struct ContentView: View {
         } else {
             return NoteDataProvider.dateSeparatorFormatter.string(from: date)
         }
+    }
+    
+    private func formatDuration(_ duration: Double) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    private func startRecording() {
+        isRecording = true
+        isPaused = false
+        recordingDuration = 0
+        
+        // Start timer to track duration
+        recordingTimer?.invalidate()
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            recordingDuration += 1.0
+            
+            // Update Live Activity if available
+            #if canImport(ActivityKit)
+            LiveActivityManager.shared.updateRecordingActivity(
+                duration: recordingDuration,
+                isPaused: false
+            )
+            #endif
+        }
+        
+        // Start Live Activity if available
+        #if canImport(ActivityKit)
+        LiveActivityManager.shared.startRecordingActivity(title: "New note")
+        #endif
+    }
+    
+    private func pauseRecording() {
+        isPaused = true
+        recordingTimer?.invalidate()
+        
+        // Update Live Activity if available
+        #if canImport(ActivityKit)
+        LiveActivityManager.shared.updateRecordingActivity(
+            duration: recordingDuration,
+            isPaused: true
+        )
+        #endif
+    }
+    
+    private func resumeRecording() {
+        isPaused = false
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            recordingDuration += 1.0
+            
+            // Update Live Activity if available
+            #if canImport(ActivityKit)
+            LiveActivityManager.shared.updateRecordingActivity(
+                duration: recordingDuration,
+                isPaused: false
+            )
+            #endif
+        }
+    }
+    
+    private func stopRecording() {
+        isRecording = false
+        isPaused = false
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        recordingDuration = 0
+        
+        // End Live Activity if available
+        #if canImport(ActivityKit)
+        LiveActivityManager.shared.endRecordingActivity()
+        #endif
     }
 }
 
