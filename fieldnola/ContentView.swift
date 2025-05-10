@@ -6,9 +6,14 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
     @State private var searchText: String = ""
+    @State private var searchBarHeight: CGFloat = 0
+    @State private var currentDateSeparator: String = ""
+    @State private var dateSeparatorPositions: [String: CGFloat] = [:]
 
     private let largeScrollableTitleFontSize: CGFloat = 34
-    private let transitionThreshold: CGFloat = 40
+    private let searchBarScrollThreshold: CGFloat = 40
+    private let titleTransitionThreshold: CGFloat = 50
+    private let dateSeparatorHeight: CGFloat = 30
     
     var filteredItems: [DisplayableListItem] {
         if searchText.isEmpty {
@@ -58,24 +63,16 @@ struct ContentView: View {
                 ScrollView {
                     ScrollDetector { offset in
                         scrollOffset = offset
+                        updateCurrentDateSeparator()
                     }
                     
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("My Notes")
-                            .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
-                            .padding(.top, safeAreaTop + 20)
-                            .padding(.bottom, 5)
-                            .opacity(headerOpacity)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .foregroundColor(Color(.label))
-                            .background(GeometryReader { geo -> Color in
-                                DispatchQueue.main.async {
-                                    headerHeight = geo.size.height
-                                }
-                                return Color.clear
-                            })
+                        // Spacer to push content down by header height
+                        Color.clear
+                            .frame(height: calculateHeaderOffset())
+                            .frame(maxWidth: .infinity)
                         
-                        // Search Bar
+                        // Search bar (scrolls with content)
                         HStack {
                             Image(systemName: "magnifyingglass")
                                 .foregroundColor(Color(.systemGray2))
@@ -106,6 +103,14 @@ struct ContentView: View {
                         .background(Color(.systemGray5))
                         .cornerRadius(10)
                         .padding(.bottom, 15)
+                        .background(
+                            GeometryReader { geo -> Color in
+                                DispatchQueue.main.async {
+                                    searchBarHeight = geo.size.height
+                                }
+                                return Color.clear
+                            }
+                        )
 
                         if filteredItems.isEmpty && !searchText.isEmpty {
                             VStack(spacing: 20) {
@@ -128,6 +133,15 @@ struct ContentView: View {
                                 switch item {
                                 case .dateSeparator(let text):
                                     DateSeparatorView(text: text)
+                                        .background(
+                                            GeometryReader { geo -> Color in
+                                                let frame = geo.frame(in: .global)
+                                                DispatchQueue.main.async {
+                                                    dateSeparatorPositions[text] = frame.minY
+                                                }
+                                                return Color.clear
+                                            }
+                                        )
                                 case .note(let note):
                                     NoteCardView(note: note)
                                 }
@@ -135,6 +149,63 @@ struct ContentView: View {
                         }
                     }
                     .padding(.horizontal)
+                }
+                
+                // Fixed overlay header
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("My Notes")
+                        .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
+                        .foregroundColor(Color(.label))
+                        .padding(.top, safeAreaTop + 20)
+                        .padding(.horizontal)
+                        .opacity(headerOpacity)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            GeometryReader { geo -> Color in
+                                DispatchQueue.main.async {
+                                    headerHeight = geo.size.height
+                                }
+                                return Color.clear
+                            }
+                        )
+                    
+                    Spacer()
+                }
+                .frame(height: headerHeight)
+                .frame(maxWidth: .infinity)
+                .offset(y: calculateTitleOffset())
+                .background(Color(.systemGray6))
+                .zIndex(3)
+                
+                // Sticky date separator
+                if headerOpacity <= 0.01 && !currentDateSeparator.isEmpty {
+                    VStack(spacing: 0) {
+                        // Add extra spacing to avoid navbar overlap
+                        Color.clear
+                            .frame(height: safeAreaTop + navBarHeight + 8)
+                        
+                        HStack {
+                            Text(currentDateSeparator)
+                                .font(.headline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(Color(.darkGray))
+                                .padding(.horizontal)
+                                .padding(.vertical, 6)
+                            
+                            Spacer()
+                        }
+                        .frame(height: dateSeparatorHeight)
+                        .frame(maxWidth: .infinity)
+                        .background(Color(.systemGray6))
+                        .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+                        .transition(.opacity)
+                        .id(currentDateSeparator) // Forces view recreation on change
+                        
+                        Spacer()
+                    }
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .zIndex(2)
+                    .animation(.easeInOut(duration: 0.2), value: currentDateSeparator)
                 }
             }
             .navigationTitle("My Notes")
@@ -161,18 +232,68 @@ struct ContentView: View {
         }
     }
     
+    private var navBarHeight: CGFloat {
+        return 44 // Standard navbar height
+    }
+    
+    private func updateCurrentDateSeparator() {
+        guard !dateSeparatorPositions.isEmpty else { return }
+        
+        // Calculate the exact threshold where the navbar ends
+        let stickyThreshold = safeAreaTop + navBarHeight + dateSeparatorHeight + 5
+        
+        // Find the separator that should be sticky - the one that just passed the threshold
+        var newSeparator = ""
+        var closestPassedPosition: CGFloat = -.infinity
+        
+        for (separator, position) in dateSeparatorPositions {
+            // If this separator has passed the threshold but is still closest to it (most recently passed)
+            if position < stickyThreshold && position > closestPassedPosition {
+                closestPassedPosition = position
+                newSeparator = separator
+            }
+        }
+        
+        // Only update if we found a valid separator
+        if !newSeparator.isEmpty {
+            currentDateSeparator = newSeparator
+        }
+    }
+    
+    private func calculateHeaderOffset() -> CGFloat {
+        // Keep space for the header when scrolling
+        return headerHeight
+    }
+    
+    private func calculateTitleOffset() -> CGFloat {
+        // Title should stick until search bar scrolls out
+        if scrollOffset < searchBarHeight + 10 {
+            return 0
+        }
+        
+        // Then title starts moving up too
+        let additionalOffset = scrollOffset - (searchBarHeight + 10)
+        return -min(additionalOffset, headerHeight)
+    }
+    
     private var headerOpacity: Double {
-        let progress = min(1, max(0, 1 - (scrollOffset / transitionThreshold)))
+        // Title stays visible until search bar scrolls out
+        if scrollOffset < searchBarScrollThreshold {
+            return 1.0
+        }
+        
+        // Then start fading out
+        let opacityOffset = scrollOffset - searchBarScrollThreshold
+        let progress = min(1, max(0, 1 - (opacityOffset / titleTransitionThreshold)))
         return Double(progress)
     }
     
     private var navBarTitleOpacity: Double {
-        let progress = min(1, max(0, scrollOffset / transitionThreshold))
-        return Double(progress)
+        return headerOpacity <= 0.01 ? 1.0 : 0.0
     }
     
     private var navBarVisibility: Visibility {
-        return scrollOffset > 0 ? .visible : .hidden
+        return headerOpacity <= 0.01 ? .visible : .hidden
     }
 
     private func generateDisplayItems() {

@@ -77,7 +77,7 @@ struct DateSeparatorView: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 16, weight: .semibold))
+            .font(.system(size: 18, weight: .semibold))
             .foregroundColor(Color(.secondaryLabel))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 15)
