@@ -5,9 +5,49 @@ struct ContentView: View {
     @State private var displayItems: [DisplayableListItem] = []
     @State private var scrollOffset: CGFloat = 0
     @State private var headerHeight: CGFloat = 0
+    @State private var searchText: String = ""
 
     private let largeScrollableTitleFontSize: CGFloat = 34
     private let transitionThreshold: CGFloat = 40
+    
+    var filteredItems: [DisplayableListItem] {
+        if searchText.isEmpty {
+            return displayItems
+        }
+        
+        let searchTextLowercased = searchText.lowercased()
+        var filteredList: [DisplayableListItem] = []
+        var lastDateHeader: String? = nil
+        
+        for item in displayItems {
+            switch item {
+            case .dateSeparator(let text):
+                lastDateHeader = text
+            case .note(let note):
+                if note.title.lowercased().contains(searchTextLowercased) {
+                    // If we find a matching note, add its date header first (if not already added)
+                    if let header = lastDateHeader {
+                        if !filteredList.contains(where: { 
+                            if case .dateSeparator(let text) = $0 {
+                                return text == header
+                            }
+                            return false
+                        }) {
+                            filteredList.append(.dateSeparator(header))
+                        }
+                    }
+                    filteredList.append(item)
+                }
+            }
+            
+            // Reset date header tracking if we've moved to a new date
+            if case .dateSeparator = item {
+                lastDateHeader = nil
+            }
+        }
+        
+        return filteredList
+    }
     
     var body: some View {
         NavigationStack {
@@ -24,7 +64,7 @@ struct ContentView: View {
                         Text("My Notes")
                             .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
                             .padding(.top, safeAreaTop + 20)
-                            .padding(.bottom, 15)
+                            .padding(.bottom, 5)
                             .opacity(headerOpacity)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundColor(Color(.label))
@@ -34,13 +74,63 @@ struct ContentView: View {
                                 }
                                 return Color.clear
                             })
+                        
+                        // Search Bar
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(Color(.systemGray2))
+                                .padding(.leading, 8)
+                            
+                            ZStack(alignment: .leading) {
+                                if searchText.isEmpty {
+                                    Text("Search")
+                                        .foregroundColor(Color(.systemGray2))
+                                }
+                                
+                                TextField("", text: $searchText)
+                                    .foregroundColor(Color(.label))
+                                    .accentColor(Color(.systemGray4))
+                            }
+                            .padding(10)
+                            
+                            if !searchText.isEmpty {
+                                Button(action: {
+                                    searchText = ""
+                                }) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundColor(Color(.systemGray4))
+                                }
+                                .padding(.trailing, 8)
+                            }
+                        }
+                        .background(Color(.systemGray5))
+                        .cornerRadius(10)
+                        .padding(.bottom, 15)
 
-                        ForEach(displayItems) { item in
-                            switch item {
-                            case .dateSeparator(let text):
-                                DateSeparatorView(text: text)
-                            case .note(let note):
-                                NoteCardView(note: note)
+                        if filteredItems.isEmpty && !searchText.isEmpty {
+                            VStack(spacing: 20) {
+                                Image(systemName: "text.magnifyingglass")
+                                    .font(.system(size: 50))
+                                    .foregroundColor(.gray)
+                                
+                                Text("No results found")
+                                    .font(.title3)
+                                    .foregroundColor(.gray)
+                                
+                                Text("Try a different search term")
+                                    .font(.subheadline)
+                                    .foregroundColor(.gray)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 50)
+                        } else {
+                            ForEach(filteredItems) { item in
+                                switch item {
+                                case .dateSeparator(let text):
+                                    DateSeparatorView(text: text)
+                                case .note(let note):
+                                    NoteCardView(note: note)
+                                }
                             }
                         }
                     }
