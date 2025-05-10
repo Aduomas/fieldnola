@@ -39,7 +39,7 @@ struct NoteCardView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
                     .fill(Color.appIconBackground)
-                    .frame(width: 35, height: 35)
+                    .frame(width: 38, height: 38)
                 if note.isCustomIcon {
                     Image(note.iconName)
                         .resizable()
@@ -52,20 +52,23 @@ struct NoteCardView: View {
                         .font(.system(size: 16, weight: .medium))
                 }
             }
-            VStack(alignment: .leading, spacing: 4) {
+            
+            VStack(alignment: .leading, spacing: 4) { // Increased spacing for better distribution
+                Spacer(minLength: 0) // Help center content
                 Text(note.title)
-                    .font(.headline)
-                    .foregroundColor(Color(.label))
+                    .font(.system(size: 16, weight: .semibold)) // Changed from headline to semibold
+                    .foregroundColor(.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(note.dateString)
                     .font(.subheadline)
-                    .foregroundColor(Color(.secondaryLabel))
+                    .foregroundColor(.secondary)
+                Spacer(minLength: 0) // Help center content
             }
             Spacer()
         }
         .padding(14)
-        .background(Color(.systemBackground))
+        .background(Color.white)
         .cornerRadius(10)
         .shadow(color: Color.black.opacity(0.05), radius: 4, x: 0, y: 2)
     }
@@ -78,7 +81,7 @@ struct DateSeparatorView: View {
     var body: some View {
         Text(text)
             .font(.system(size: 18, weight: .semibold))
-            .foregroundColor(Color(.secondaryLabel))
+            .foregroundColor(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 15)
             .padding(.bottom, 5)
