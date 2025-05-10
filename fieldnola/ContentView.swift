@@ -26,6 +26,28 @@ class LiveActivityManager {
         return ActivityAuthorizationInfo().areActivitiesEnabled
     }
     
+    // Getter to check if we have an active recording
+    var hasActiveRecording: Bool {
+        return recordingActivity != nil
+    }
+    
+    // Method to update the title of existing activity
+    func updateActivityTitle(_ title: String, duration: TimeInterval, isPaused: Bool) {
+        guard let activity = recordingActivity else { return }
+        
+        Task {
+            let updatedContentState = LiveRecordingAttributes.ContentState(
+                duration: duration,
+                isRecording: true,
+                isPaused: isPaused
+            )
+            
+            await activity.update(
+                ActivityContent(state: updatedContentState, staleDate: nil)
+            )
+        }
+    }
+    
     func startRecordingActivity(title: String) {
         guard isLiveActivitySupported else { return }
         
@@ -102,6 +124,13 @@ struct ContentView: View {
     @State private var recordingDuration: Double = 0
     @State private var recordingTimer: Timer? = nil
     @State private var showRecordingSheet: Bool = false
+    @State private var noteTitle: String = "New note"
+    @State private var noteDescription: String = "Feel free to write notes here"
+    
+    // Animation state for waveform
+    @State private var waveformOffsets: [CGFloat] = Array(repeating: 0, count: 10)
+    @State private var waveformHeights: [CGFloat] = Array(repeating: 0, count: 10)
+    @State private var waveformTimer: Timer? = nil
 
     private let largeScrollableTitleFontSize: CGFloat = 34
     private let searchBarScrollThreshold: CGFloat = 40
@@ -335,6 +364,8 @@ struct ContentView: View {
                     // New recording button
                     Button(action: {
                         showRecordingSheet = true
+                        noteTitle = "New note"
+                        noteDescription = "Feel free to write notes here"
                         startRecording()
                     }) {
                         HStack(spacing: 8) {
@@ -376,6 +407,7 @@ struct ContentView: View {
                                 .fill(Color.gray.opacity(0.5))
                                 .frame(width: 36, height: 5)
                                 .padding(.top, 8)
+                                .padding(.leading, 10)
                             
                             Spacer()
                             
@@ -384,103 +416,107 @@ struct ContentView: View {
                                 stopRecording()
                             }) {
                                 Image(systemName: "xmark")
-                                    .font(.system(size: 16, weight: .medium))
+                                    .font(.system(size: 20, weight: .medium))
                                     .foregroundColor(.gray)
-                                    .padding(8)
+                                    .padding(10)
                             }
                         }
                         .padding(.horizontal)
                         
-                        // Note title
-                        Text("New note")
+                        // Editable note title
+                        TextField("Title", text: $noteTitle)
                             .font(.system(size: 24, weight: .bold))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal)
                             .padding(.top, 16)
                         
-                        // Description text
-                        HStack(spacing: 8) {
-                            Image(systemName: "pencil")
-                                .foregroundColor(.gray)
-                            
-                            Text("Feel free to write notes here")
-                                .font(.system(size: 16))
-                                .foregroundColor(.gray)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal)
-                        .padding(.top, 6)
+                        // Editable description text
+                        TextField("Description", text: $noteDescription)
+                            .font(.system(size: 16))
+                            .foregroundColor(.gray)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.top, 6)
                         
                         Spacer()
                         
                         // Recording controls
-                        HStack(alignment: .center) {
-                            // Pause/Resume Button
-                            Button(action: {
-                                if isPaused {
-                                    resumeRecording()
-                                } else {
-                                    pauseRecording()
-                                }
-                            }) {
-                                Image(systemName: isPaused ? "play.circle.fill" : "pause.circle.fill")
-                                    .font(.system(size: 32))
-                                    .foregroundColor(.gray)
-                            }
-                            .frame(width: 44, height: 44)
-                            
-                            Spacer()
-                            
-                            // Waveform and duration
-                            HStack(spacing: 6) {
-                                // Simple waveform visualization
-                                ForEach(0..<5) { i in
-                                    RoundedRectangle(cornerRadius: 1)
-                                        .fill(Color.green)
-                                        .frame(width: 3, height: CGFloat(10 + Int.random(in: 5...20)))
+                        VStack(spacing: 8) {
+                            // Buttons, waveform and duration in one row
+                            HStack {
+                                // Pause/Resume Button
+                                Button(action: {
+                                    if isPaused {
+                                        resumeRecording()
+                                    } else {
+                                        pauseRecording()
+                                    }
+                                }) {
+                                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
+                                        .font(.system(size: 20, weight: .bold))
+                                        .foregroundColor(.black)
+                                        .frame(width: 110, height: 60)
+                                        .background(Color(.systemGray5))
+                                        .cornerRadius(30)
                                 }
                                 
-                                // Duration text
-                                Text(formatDuration(recordingDuration))
-                                    .font(.system(size: 14, weight: .medium))
-                                    .foregroundColor(.gray)
-                                    .monospacedDigit()
+                                Spacer()
                                 
-                                ForEach(0..<5) { i in
-                                    RoundedRectangle(cornerRadius: 1)
-                                        .fill(Color.green)
-                                        .frame(width: 3, height: CGFloat(10 + Int.random(in: 5...20)))
+                                // Waveform and duration together as a single centered unit
+                                HStack(spacing: 4) {
+                                    // Waveform in the middle
+                                    ZStack {
+                                        ForEach(0..<3, id: \.self) { i in
+                                            RoundedRectangle(cornerRadius: 1.5)
+                                                .fill(Color(red: 0.06, green: 0.54, blue: 0.42))
+                                                .frame(width: 3, height: waveformHeights[i])
+                                                .offset(x: CGFloat(i * 6))
+                                        }
+                                    }
+                                    .frame(width: 40, height: 40)
+                                    
+                                    // Duration text
+                                    Text(formatDuration(recordingDuration))
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.black)
+                                        .monospacedDigit()
+                                        .frame(width: 40, height: 40)
+                                }
+                                .frame(width: 100)
+                                
+                                Spacer()
+                                
+                                // End Button
+                                Button(action: {
+                                    showRecordingSheet = false
+                                    stopRecording()
+                                }) {
+                                    Text("End")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundColor(.white)
+                                        .frame(width: 110, height: 60)
+                                        .background(Color(red: 0.06, green: 0.54, blue: 0.42))
+                                        .cornerRadius(30)
                                 }
                             }
-                            
-                            Spacer()
-                            
-                            // End Button
-                            Button(action: {
-                                showRecordingSheet = false
-                                stopRecording()
-                            }) {
-                                Text("End")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 15)
-                                    .background(Color(red: 0.06, green: 0.54, blue: 0.42))
-                                    .cornerRadius(30)
-                                    .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
-                            }
+                            .padding(.horizontal)
+                            .padding(.bottom, 24)
                         }
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 30)
                     }
                     .background(Color.white)
                     .cornerRadius(16)
                     .frame(height: 350)
                     .transition(.move(edge: .bottom))
                     .animation(.spring(), value: showRecordingSheet)
+                    .onChange(of: noteTitle) { newValue in
+                        updateLiveActivityTitle(newValue)
+                    }
                 }
                 .edgesIgnoringSafeArea(.bottom)
             }
+        }
+        .onAppear {
+            setupWaveformAnimation()
         }
     }
     
@@ -593,6 +629,38 @@ struct ContentView: View {
         return String(format: "%d:%02d", minutes, seconds)
     }
     
+    private func setupWaveformAnimation() {
+        // Initialize random heights for the waveform bars
+        for i in 0..<waveformHeights.count {
+            waveformHeights[i] = CGFloat.random(in: 5...35)
+        }
+    }
+    
+    private func startWaveformAnimation() {
+        // Cancel any existing timer
+        waveformTimer?.invalidate()
+        
+        // Create a timer that updates the waveform every 0.1 seconds
+        waveformTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { _ in
+            for i in 0..<waveformHeights.count {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    waveformHeights[i] = CGFloat.random(in: 5...35)
+                }
+            }
+        }
+    }
+    
+    private func stopWaveformAnimation() {
+        waveformTimer?.invalidate()
+        waveformTimer = nil
+    }
+    
+    private func updateLiveActivityTitle(_ title: String) {
+        #if canImport(ActivityKit)
+        LiveActivityManager.shared.updateActivityTitle(title, duration: recordingDuration, isPaused: isPaused)
+        #endif
+    }
+    
     private func startRecording() {
         isRecording = true
         isPaused = false
@@ -612,15 +680,21 @@ struct ContentView: View {
             #endif
         }
         
+        // Start the waveform animation
+        startWaveformAnimation()
+        
         // Start Live Activity if available
         #if canImport(ActivityKit)
-        LiveActivityManager.shared.startRecordingActivity(title: "New note")
+        LiveActivityManager.shared.startRecordingActivity(title: noteTitle)
         #endif
     }
     
     private func pauseRecording() {
         isPaused = true
         recordingTimer?.invalidate()
+        
+        // Pause the waveform animation
+        stopWaveformAnimation()
         
         // Update Live Activity if available
         #if canImport(ActivityKit)
@@ -644,6 +718,9 @@ struct ContentView: View {
             )
             #endif
         }
+        
+        // Resume the waveform animation
+        startWaveformAnimation()
     }
     
     private func stopRecording() {
@@ -652,6 +729,9 @@ struct ContentView: View {
         recordingTimer?.invalidate()
         recordingTimer = nil
         recordingDuration = 0
+        
+        // Stop the waveform animation
+        stopWaveformAnimation()
         
         // End Live Activity if available
         #if canImport(ActivityKit)
