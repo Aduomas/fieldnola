@@ -3,10 +3,12 @@ import SwiftUI
 struct ContentView: View {
     @State private var safeAreaTop: CGFloat = 0
     @State private var displayItems: [DisplayableListItem] = []
-    @State private var isScrolling: Bool = false
+    @State private var scrollOffset: CGFloat = 0
+    @State private var headerHeight: CGFloat = 0
 
     private let largeScrollableTitleFontSize: CGFloat = 34
-
+    private let transitionThreshold: CGFloat = 40
+    
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
@@ -14,15 +16,24 @@ struct ContentView: View {
                     .edgesIgnoringSafeArea(.all)
 
                 ScrollView {
+                    ScrollDetector { offset in
+                        scrollOffset = offset
+                    }
+                    
                     VStack(alignment: .leading, spacing: 10) {
                         Text("My Notes")
                             .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
                             .padding(.top, safeAreaTop + 20)
                             .padding(.bottom, 15)
-                            .opacity(isScrolling ? 1.0 : 0.0)
-                            .animation(.easeInOut(duration: 0.2), value: isScrolling)
+                            .opacity(headerOpacity)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .foregroundColor(Color(.label))
+                            .background(GeometryReader { geo -> Color in
+                                DispatchQueue.main.async {
+                                    headerHeight = geo.size.height
+                                }
+                                return Color.clear
+                            })
 
                         ForEach(displayItems) { item in
                             switch item {
@@ -35,22 +46,20 @@ struct ContentView: View {
                     }
                     .padding(.horizontal)
                 }
-                .onScrollPhaseChange { _, phase in
-                    switch phase {
-                    case .idle:
-                        isScrolling = false
-                    case .tracking, .decelerating:
-                        isScrolling = true
-                    @unknown default:
-                        isScrolling = false
-                    }
-                }
             }
             .navigationTitle("My Notes")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("My Notes")
+                        .font(.headline)
+                        .fontWeight(.semibold)
+                        .opacity(navBarTitleOpacity)
+                        .animation(.easeInOut(duration: 0.2), value: scrollOffset)
+                }
+            }
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarVisibility(isScrolling ? .hidden : .visible, for: .navigationBar)
+            .toolbarBackground(navBarVisibility, for: .navigationBar)
             .edgesIgnoringSafeArea(.top)
             .onAppear {
                 if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
@@ -60,6 +69,20 @@ struct ContentView: View {
                 generateDisplayItems()
             }
         }
+    }
+    
+    private var headerOpacity: Double {
+        let progress = min(1, max(0, 1 - (scrollOffset / transitionThreshold)))
+        return Double(progress)
+    }
+    
+    private var navBarTitleOpacity: Double {
+        let progress = min(1, max(0, scrollOffset / transitionThreshold))
+        return Double(progress)
+    }
+    
+    private var navBarVisibility: Visibility {
+        return scrollOffset > 0 ? .visible : .hidden
     }
 
     private func generateDisplayItems() {
@@ -99,6 +122,30 @@ struct ContentView: View {
         } else {
             return NoteDataProvider.dateSeparatorFormatter.string(from: date)
         }
+    }
+}
+
+struct ScrollDetector: View {
+    let onScroll: (CGFloat) -> Void
+    
+    var body: some View {
+        GeometryReader { geometry in
+            Color.clear.preference(
+                key: ScrollOffsetPreferenceKey.self,
+                value: geometry.frame(in: .global).minY
+            )
+        }
+        .frame(height: 0)
+        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
+            onScroll(-value)
+        }
+    }
+}
+
+struct ScrollOffsetPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
