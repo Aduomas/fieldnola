@@ -1,113 +1,5 @@
 import SwiftUI
 
-// Minimal attributes structure for Live Activity support
-#if canImport(ActivityKit)
-import ActivityKit
-
-// Define a local copy of the attributes for the main app
-struct LiveRecordingAttributes: ActivityAttributes {
-    public struct ContentState: Codable, Hashable {
-        var duration: TimeInterval
-        var isRecording: Bool
-        var isPaused: Bool
-    }
-    
-    var title: String
-}
-
-// LiveActivity Manager
-class LiveActivityManager {
-    static let shared = LiveActivityManager()
-    private var recordingActivity: Activity<LiveRecordingAttributes>? = nil
-    
-    private init() {}
-    
-    var isLiveActivitySupported: Bool {
-        return ActivityAuthorizationInfo().areActivitiesEnabled
-    }
-    
-    // Getter to check if we have an active recording
-    var hasActiveRecording: Bool {
-        return recordingActivity != nil
-    }
-    
-    // Method to update the title of existing activity
-    func updateActivityTitle(_ title: String, duration: TimeInterval, isPaused: Bool) {
-        guard let activity = recordingActivity else { return }
-        
-        Task {
-            let updatedContentState = LiveRecordingAttributes.ContentState(
-                duration: duration,
-                isRecording: true,
-                isPaused: isPaused
-            )
-            
-            await activity.update(
-                ActivityContent(state: updatedContentState, staleDate: nil)
-            )
-        }
-    }
-    
-    func startRecordingActivity(title: String) {
-        guard isLiveActivitySupported else { return }
-        
-        do {
-            let attributes = LiveRecordingAttributes(title: title)
-            let initialContentState = LiveRecordingAttributes.ContentState(
-                duration: 0,
-                isRecording: true,
-                isPaused: false
-            )
-            
-            let activity = try Activity.request(
-                attributes: attributes,
-                content: .init(state: initialContentState, staleDate: nil)
-            )
-            
-            self.recordingActivity = activity
-            print("Started recording LiveActivity with ID: \(activity.id)")
-        } catch {
-            print("Error starting LiveActivity: \(error.localizedDescription)")
-        }
-    }
-    
-    func updateRecordingActivity(duration: TimeInterval, isPaused: Bool) {
-        guard let activity = recordingActivity else { return }
-        
-        Task {
-            let updatedContentState = LiveRecordingAttributes.ContentState(
-                duration: duration,
-                isRecording: true,
-                isPaused: isPaused
-            )
-            
-            await activity.update(
-                ActivityContent(state: updatedContentState, staleDate: nil)
-            )
-        }
-    }
-    
-    func endRecordingActivity() {
-        guard let activity = recordingActivity else { return }
-        
-        Task {
-            let finalContentState = LiveRecordingAttributes.ContentState(
-                duration: 0,
-                isRecording: false,
-                isPaused: false
-            )
-            
-            await activity.end(
-                ActivityContent(state: finalContentState, staleDate: nil),
-                dismissalPolicy: .immediate
-            )
-            
-            recordingActivity = nil
-        }
-    }
-}
-#endif
-
 struct ContentView: View {
     @State private var safeAreaTop: CGFloat = 0
     @State private var displayItems: [DisplayableListItem] = []
@@ -128,7 +20,6 @@ struct ContentView: View {
     @State private var noteDescription: String = "Feel free to write notes here"
     
     // Animation state for waveform
-    @State private var waveformOffsets: [CGFloat] = Array(repeating: 0, count: 10)
     @State private var waveformHeights: [CGFloat] = Array(repeating: 0, count: 10)
     @State private var waveformTimer: Timer? = nil
 
@@ -154,12 +45,16 @@ struct ContentView: View {
                 if note.title.lowercased().contains(searchTextLowercased) {
                     // If we find a matching note, add its date header first (if not already added)
                     if let header = lastDateHeader {
-                        if !filteredList.contains(where: { 
-                            if case .dateSeparator(let text) = $0 {
+                        // Check if the header already exists in the filtered list
+                        let headerExists = filteredList.contains { item in
+                            if case .dateSeparator(let text) = item {
                                 return text == header
                             }
                             return false
-                        }) {
+                        }
+                        
+                        // Add header if it doesn't exist yet
+                        if !headerExists {
                             filteredList.append(.dateSeparator(header))
                         }
                     }
@@ -227,11 +122,11 @@ struct ContentView: View {
                             .cornerRadius(10)
                             .padding(.bottom, 15)
                             .background(
-                                GeometryReader { geo -> Color in
+                                GeometryReader { geo in
                                     DispatchQueue.main.async {
                                         searchBarHeight = geo.size.height
                                     }
-                                    return Color.clear
+                                    Color.clear
                                 }
                             )
 
@@ -386,133 +281,33 @@ struct ContentView: View {
                 }
             }
             
-            // Bottom sheet for recording
+            // Bottom sheet using the new component
             if showRecordingSheet {
-                Color.black.opacity(0.3)
-                    .edgesIgnoringSafeArea(.all)
-                    .onTapGesture {
-                        // Close sheet when tapping outside
-                        showRecordingSheet = false
+                BottomSheet(
+                    isPresented: $showRecordingSheet,
+                    title: $noteTitle,
+                    description: $noteDescription,
+                    isRecording: $isRecording,
+                    isPaused: $isPaused,
+                    recordingDuration: $recordingDuration,
+                    waveformHeights: $waveformHeights,
+                    onClose: {
                         stopRecording()
-                    }
-                
-                VStack {
-                    Spacer()
-                    
-                    // Recording bottom sheet
-                    VStack(spacing: 0) {
-                        // Handle and close button
-                        HStack {
-                            Capsule()
-                                .fill(Color.gray.opacity(0.5))
-                                .frame(width: 36, height: 5)
-                                .padding(.top, 8)
-                                .padding(.leading, 10)
-                            
-                            Spacer()
-                            
-                            Button(action: {
-                                showRecordingSheet = false
-                                stopRecording()
-                            }) {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 20, weight: .medium))
-                                    .foregroundColor(.gray)
-                                    .padding(10)
-                            }
+                    },
+                    onPauseResume: {
+                        if isPaused {
+                            resumeRecording()
+                        } else {
+                            pauseRecording()
                         }
-                        .padding(.horizontal)
-                        
-                        // Editable note title
-                        TextField("Title", text: $noteTitle)
-                            .font(.system(size: 24, weight: .bold))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal)
-                            .padding(.top, 16)
-                        
-                        // Editable description text
-                        TextField("Description", text: $noteDescription)
-                            .font(.system(size: 16))
-                            .foregroundColor(.gray)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal)
-                            .padding(.top, 6)
-                        
-                        Spacer()
-                        
-                        // Recording controls
-                        VStack(spacing: 8) {
-                            // Buttons, waveform and duration in one row
-                            HStack {
-                                // Pause/Resume Button
-                                Button(action: {
-                                    if isPaused {
-                                        resumeRecording()
-                                    } else {
-                                        pauseRecording()
-                                    }
-                                }) {
-                                    Image(systemName: isPaused ? "play.fill" : "pause.fill")
-                                        .font(.system(size: 20, weight: .bold))
-                                        .foregroundColor(.black)
-                                        .frame(width: 110, height: 60)
-                                        .background(Color(.systemGray5))
-                                        .cornerRadius(30)
-                                }
-                                
-                                Spacer()
-                                
-                                // Waveform and duration together as a single centered unit
-                                HStack(spacing: 4) {
-                                    // Waveform in the middle
-                                    ZStack {
-                                        ForEach(0..<3, id: \.self) { i in
-                                            RoundedRectangle(cornerRadius: 1.5)
-                                                .fill(Color(red: 0.06, green: 0.54, blue: 0.42))
-                                                .frame(width: 3, height: waveformHeights[i])
-                                                .offset(x: CGFloat(i * 6))
-                                        }
-                                    }
-                                    .frame(width: 40, height: 40)
-                                    
-                                    // Duration text
-                                    Text(formatDuration(recordingDuration))
-                                        .font(.system(size: 18, weight: .medium))
-                                        .foregroundColor(.black)
-                                        .monospacedDigit()
-                                        .frame(width: 40, height: 40)
-                                }
-                                .frame(width: 100)
-                                
-                                Spacer()
-                                
-                                // End Button
-                                Button(action: {
-                                    showRecordingSheet = false
-                                    stopRecording()
-                                }) {
-                                    Text("End")
-                                        .font(.system(size: 18, weight: .medium))
-                                        .foregroundColor(.white)
-                                        .frame(width: 110, height: 60)
-                                        .background(Color(red: 0.06, green: 0.54, blue: 0.42))
-                                        .cornerRadius(30)
-                                }
-                            }
-                            .padding(.horizontal)
-                            .padding(.bottom, 24)
-                        }
-                    }
-                    .background(Color.white)
-                    .cornerRadius(16)
-                    .frame(height: 350)
-                    .transition(.move(edge: .bottom))
-                    .animation(.spring(), value: showRecordingSheet)
-                    .onChange(of: noteTitle) { newValue in
+                    },
+                    onUpdateTitle: { newValue in
                         updateLiveActivityTitle(newValue)
                     }
+                ) {
+                    // Additional content can go here
+                    EmptyView()
                 }
-                .edgesIgnoringSafeArea(.bottom)
             }
         }
         .onAppear {
@@ -737,30 +532,6 @@ struct ContentView: View {
         #if canImport(ActivityKit)
         LiveActivityManager.shared.endRecordingActivity()
         #endif
-    }
-}
-
-struct ScrollDetector: View {
-    let onScroll: (CGFloat) -> Void
-    
-    var body: some View {
-        GeometryReader { geometry in
-            Color.clear.preference(
-                key: ScrollOffsetPreferenceKey.self,
-                value: geometry.frame(in: .global).minY
-            )
-        }
-        .frame(height: 0)
-        .onPreferenceChange(ScrollOffsetPreferenceKey.self) { value in
-            onScroll(-value)
-        }
-    }
-}
-
-struct ScrollOffsetPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

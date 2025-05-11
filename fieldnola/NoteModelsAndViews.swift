@@ -6,16 +6,6 @@ extension Color {
     static let appIconBackground = Color(red: 0.8, green: 0.88, blue: 0.82)
 }
 
-// Data Model for a Single Note
-struct NoteItem: Identifiable {
-    let id = UUID()
-    var title: String
-    var date: Date
-    var iconName: String
-    var isCustomIcon: Bool = false
-    var dateString: String = "" // Populated with formatted time
-}
-
 // Enum to represent either a Note or a Date Separator in the list
 enum DisplayableListItem: Identifiable {
     case note(NoteItem)
