@@ -1,5 +1,42 @@
 import SwiftUI
 
+class TranscriptManager: ObservableObject {
+    @Published var segments: [TranscriptSegment] = []
+    
+    init(sampleData: Bool = false) {
+        if sampleData {
+            loadSampleData()
+        }
+    }
+    
+    private func loadSampleData() {
+        segments = [
+            TranscriptSegment(id: UUID(), text: "We should focus on improving the user experience first.", timestamp: 0, duration: 5.2),
+            TranscriptSegment(id: UUID(), text: "The mobile app needs to be our top priority for Q2.", timestamp: 6.1, duration: 4.8),
+            TranscriptSegment(id: UUID(), text: "Let's schedule a follow-up meeting with the design team next week.", timestamp: 12.4, duration: 6.5)
+        ]
+    }
+}
+
+struct TranscriptSegment: Identifiable {
+    let id: UUID
+    let text: String
+    let timestamp: TimeInterval
+    let duration: TimeInterval
+    
+    var formattedTimestamp: String {
+        let minutes = Int(timestamp) / 60
+        let seconds = Int(timestamp) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    var formattedDuration: String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
+
 struct NoteView: View {
     let note: NoteItem
     @Environment(\.presentationMode) var presentationMode
@@ -7,6 +44,10 @@ struct NoteView: View {
     @State private var isSharePresented = false
     @State private var isEditing = false
     @State private var markdownContent: String
+    
+    // Add state for transcript functionality
+    @State private var isTranscriptPresented = false
+    @StateObject private var transcriptManager = TranscriptManager(sampleData: true)
     
     // Initialize with sample content or pass from parent
     init(note: NoteItem, initialContent: String? = nil) {
@@ -96,6 +137,9 @@ struct NoteView: View {
                     }
                 }
             }
+            
+            // Transcript bottom sheet
+            TranscriptBottomSheet(transcriptManager: transcriptManager, isPresented: $isTranscriptPresented)
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationBarBackButtonHidden(true)
@@ -238,6 +282,11 @@ struct NoteView: View {
                         isEditing = true
                     }
                 },
+                .default(Text("Show Transcript")) {
+                    withAnimation {
+                        isTranscriptPresented = true
+                    }
+                },
                 .default(Text("Add to Favorites")) {
                     // Add to favorites action would go here
                 },
@@ -251,6 +300,7 @@ struct NoteView: View {
             ]
         )
     }
+
     
     // Share sheet
     private var shareSheet: some View {
@@ -295,6 +345,152 @@ struct NoteView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MMM d, h:mm a"
         return formatter.string(from: date)
+    }
+}
+struct TranscriptBottomSheet: View {
+    @ObservedObject var transcriptManager: TranscriptManager
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            // Dimmed background
+            if isPresented {
+                Color.black
+                    .opacity(0.4)
+                    .edgesIgnoringSafeArea(.all)
+                    .onTapGesture {
+                        withAnimation {
+                            isPresented = false
+                        }
+                    }
+            }
+            
+            // Transcript view
+            VStack {
+                Spacer()
+                
+                TranscriptView(transcriptManager: transcriptManager, isPresented: $isPresented)
+                    #if os(iOS)
+                    .frame(maxHeight: UIScreen.main.bounds.height * 0.85)
+                    #else
+                    .frame(maxHeight: 600) // Fixed height for macOS
+                    #endif
+                    .transition(.move(edge: .bottom))
+            }
+            .edgesIgnoringSafeArea(.bottom)
+            .opacity(isPresented ? 1 : 0)
+            #if os(iOS)
+            .offset(y: isPresented ? 0 : UIScreen.main.bounds.height)
+            #else
+            .offset(y: isPresented ? 0 : 1000) // Large enough offset for macOS
+            #endif
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: isPresented)
+        }
+        .edgesIgnoringSafeArea(.all)
+    }
+}
+
+struct TranscriptView: View {
+    @ObservedObject var transcriptManager: TranscriptManager
+    @Binding var isPresented: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Text("Transcript")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button(action: {
+                    isPresented = false
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 15)
+            
+            // Empty state
+            if transcriptManager.segments.isEmpty {
+                emptyTranscriptView
+            } else {
+                // Transcript segments
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(transcriptManager.segments) { segment in
+                            TranscriptSegmentCard(segment: segment)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 20)
+                }
+            }
+            
+        }
+        #if os(iOS)
+        .background(Color(UIColor.systemGray6))
+        #else
+        .background(Color.gray.opacity(0.1))
+        #endif
+        .cornerRadius(15)
+    }
+    
+    // Empty state view
+    private var emptyTranscriptView: some View {
+        VStack(spacing: 15) {
+            Image(systemName: "text.bubble")
+                .font(.system(size: 60))
+                .foregroundColor(.gray.opacity(0.7))
+            
+            Text("No transcript available")
+                .font(.headline)
+                .foregroundColor(.gray)
+            
+            Text("Start recording to generate transcript")
+                .font(.subheadline)
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(30)
+    }
+}
+
+struct TranscriptSegmentCard: View {
+    let segment: TranscriptSegment
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // Timestamp and duration
+            HStack {
+                Text(segment.formattedTimestamp)
+                    .font(.footnote)
+                    .foregroundColor(Color(.systemGray))
+                
+                Spacer()
+                
+                Text(segment.formattedDuration)
+                    .font(.footnote)
+                    .foregroundColor(Color(.systemGray))
+            }
+            
+            Text(segment.text)
+                .font(.body)
+                .foregroundColor(.primary)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+            
+        }
+        .padding(15)
+        .background(Color.white)
+        .cornerRadius(10)
+        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
     }
 }
 
