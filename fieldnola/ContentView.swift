@@ -10,6 +10,10 @@ struct ContentView: View {
     @State private var currentDateSeparator: String = ""
     @State private var dateSeparatorPositions: [String: CGFloat] = [:]
     
+    // Note navigation state
+    @State private var selectedNote: NoteItem? = nil
+    @State private var showNoteDetail: Bool = false
+    
     // Recording state variables
     @State private var isRecording: Bool = false
     @State private var isPaused: Bool = false
@@ -75,239 +79,41 @@ struct ContentView: View {
         ZStack {
             NavigationStack {
                 ZStack(alignment: .top) {
+                    // Background color
                     Color(.systemGray6)
                         .edgesIgnoringSafeArea(.all)
 
-                    ScrollView {
-                        ScrollDetector { offset in
-                            scrollOffset = offset
-                            updateCurrentDateSeparator()
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 10) {
-                            // Spacer to push content down by header height
-                            Color.clear
-                                .frame(height: calculateHeaderOffset())
-                                .frame(maxWidth: .infinity)
-                            
-                            // Search bar (scrolls with content)
-                            HStack {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundColor(Color(.systemGray2))
-                                    .padding(.leading, 8)
-                                
-                                ZStack(alignment: .leading) {
-                                    if searchText.isEmpty {
-                                        Text("Search")
-                                            .foregroundColor(Color(.systemGray2))
-                                    }
-                                    
-                                    TextField("", text: $searchText)
-                                        .foregroundColor(Color(.label))
-                                        .accentColor(Color(.systemGray4))
-                                }
-                                .padding(10)
-                                
-                                if !searchText.isEmpty {
-                                    Button(action: {
-                                        searchText = ""
-                                    }) {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .foregroundColor(Color(.systemGray4))
-                                    }
-                                    .padding(.trailing, 8)
-                                }
-                            }
-                            .background(Color(.systemGray5))
-                            .cornerRadius(10)
-                            .padding(.bottom, 15)
-                            .background(
-                                GeometryReader { geo in
-                                    DispatchQueue.main.async {
-                                        searchBarHeight = geo.size.height
-                                    }
-                                    Color.clear
-                                }
-                            )
-
-                            if filteredItems.isEmpty && !searchText.isEmpty {
-                                VStack(spacing: 20) {
-                                    Image(systemName: "text.magnifyingglass")
-                                        .font(.system(size: 50))
-                                        .foregroundColor(.gray)
-                                    
-                                    Text("No results found")
-                                        .font(.title3)
-                                        .foregroundColor(.gray)
-                                    
-                                    Text("Try a different search term")
-                                        .font(.subheadline)
-                                        .foregroundColor(.gray)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 50)
-                            } else {
-                                ForEach(filteredItems) { item in
-                                    switch item {
-                                    case .dateSeparator(let text):
-                                        DateSeparatorView(text: text)
-                                            .background(
-                                                GeometryReader { geo -> Color in
-                                                    let frame = geo.frame(in: .global)
-                                                    DispatchQueue.main.async {
-                                                        dateSeparatorPositions[text] = frame.minY
-                                                    }
-                                                    return Color.clear
-                                                }
-                                            )
-                                    case .note(let note):
-                                        NoteCardView(note: note)
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
+                    // Main content scrollview
+                    mainScrollView
                     
                     // Fixed overlay header
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("My Notes")
-                            .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
-                            .foregroundColor(Color(.label))
-                            .padding(.top, safeAreaTop + 20)
-                            .padding(.horizontal)
-                            .opacity(headerOpacity)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                GeometryReader { geo -> Color in
-                                    DispatchQueue.main.async {
-                                        headerHeight = geo.size.height
-                                    }
-                                    return Color.clear
-                                }
-                            )
-                        
-                        Spacer()
-                    }
-                    .frame(height: headerHeight)
-                    .frame(maxWidth: .infinity)
-                    .offset(y: calculateTitleOffset())
-                    .background(Color(.systemGray6))
-                    .zIndex(3)
+                    headerView
                     
                     // Sticky date separator
-                    if headerOpacity <= 0.01 && !currentDateSeparator.isEmpty {
-                        VStack(spacing: 0) {
-                            // Add extra spacing to avoid navbar overlap
-                            Color.clear
-                                .frame(height: safeAreaTop + navBarHeight + 8)
-                            
-                            HStack {
-                                Text(currentDateSeparator)
-                                    .font(.headline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(Color(.darkGray))
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 6)
-                                
-                                Spacer()
-                            }
-                            .frame(height: dateSeparatorHeight)
-                            .frame(maxWidth: .infinity)
-                            .background(Color(.systemGray6))
-                            .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
-                            .transition(.opacity)
-                            .id(currentDateSeparator) // Forces view recreation on change
-                            
-                            Spacer()
-                        }
-                        .frame(maxHeight: .infinity, alignment: .top)
-                        .zIndex(2)
-                        .animation(.easeInOut(duration: 0.2), value: currentDateSeparator)
-                    }
+                    stickyDateSeparatorView
                 }
                 .navigationTitle("My Notes")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        Text("My Notes")
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .opacity(navBarTitleOpacity)
-                            .animation(.easeInOut(duration: 0.2), value: scrollOffset)
+                        navbarTitleView
                     }
                 }
                 .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
                 .toolbarBackground(navBarVisibility, for: .navigationBar)
                 .edgesIgnoringSafeArea(.top)
                 .onAppear {
-                    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                       let window = windowScene.windows.first {
-                        safeAreaTop = window.safeAreaInsets.top
-                    }
+                    setUpSafeAreaTop()
                     generateDisplayItems()
                 }
             }
             
             // Add recording button
-            VStack {
-                Spacer()
-                
-                HStack {
-                    Spacer()
-                    
-                    // New recording button
-                    Button(action: {
-                        showRecordingSheet = true
-                        noteTitle = "New note"
-                        noteDescription = "Feel free to write notes here"
-                        startRecording()
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "pencil")
-                                .font(.system(size: 16))
-                            Text("New")
-                                .font(.system(size: 16, weight: .medium))
-                        }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 35)
-                        .padding(.vertical, 20)
-                        .background(Color(red: 0.06, green: 0.54, blue: 0.42))
-                        .cornerRadius(30)
-                        .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
-                    }
-                    .padding(.trailing, 20)
-                    .padding(.bottom, 20)
-                }
-            }
+            newNoteButton
             
-            // Bottom sheet using the new component
+            // Bottom sheet
             if showRecordingSheet {
-                BottomSheet(
-                    isPresented: $showRecordingSheet,
-                    title: $noteTitle,
-                    description: $noteDescription,
-                    isRecording: $isRecording,
-                    isPaused: $isPaused,
-                    recordingDuration: $recordingDuration,
-                    waveformHeights: $waveformHeights,
-                    onClose: {
-                        stopRecording()
-                    },
-                    onPauseResume: {
-                        if isPaused {
-                            resumeRecording()
-                        } else {
-                            pauseRecording()
-                        }
-                    },
-                    onUpdateTitle: { newValue in
-                        updateLiveActivityTitle(newValue)
-                    }
-                ) {
-                    // Additional content can go here
-                    EmptyView()
-                }
+                recordingBottomSheet
             }
         }
         .onAppear {
@@ -315,8 +121,349 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - Extracted Views
+    
+    private var mainScrollView: some View {
+        ScrollView {
+            ScrollDetector { offset in
+                scrollOffset = offset
+                updateCurrentDateSeparator()
+            }
+            
+            VStack(alignment: .leading, spacing: 10) {
+                // Spacer to push content down by header height
+                Color.clear
+                    .frame(height: calculateHeaderOffset())
+                    .frame(maxWidth: .infinity)
+                
+                // Search bar (scrolls with content)
+                searchBarView
+                
+                // Content based on filtered items
+                contentView
+            }
+            .padding(.horizontal)
+        }
+    }
+    
+    private var searchBarView: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(Color(.systemGray2))
+                .padding(.leading, 8)
+            
+            ZStack(alignment: .leading) {
+                if searchText.isEmpty {
+                    Text("Search")
+                        .foregroundColor(Color(.systemGray2))
+                }
+                
+                TextField("", text: $searchText)
+                    .foregroundColor(Color(.label))
+                    .accentColor(Color(.systemGray4))
+            }
+            .padding(10)
+            
+            if !searchText.isEmpty {
+                Button(action: {
+                    searchText = ""
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(Color(.systemGray4))
+                }
+                .padding(.trailing, 8)
+            }
+        }
+        .background(Color(.systemGray5))
+        .cornerRadius(10)
+        .padding(.bottom, 15)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear {
+                        searchBarHeight = geo.size.height
+                    }
+            }
+        )
+    }
+    
+    private var contentView: some View {
+        Group {
+            if filteredItems.isEmpty && !searchText.isEmpty {
+                noResultsView
+            } else {
+                filteredItemsView
+            }
+        }
+    }
+    
+    private var noResultsView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "text.magnifyingglass")
+                .font(.system(size: 50))
+                .foregroundColor(.gray)
+            
+            Text("No results found")
+                .font(.title3)
+                .foregroundColor(.gray)
+            
+            Text("Try a different search term")
+                .font(.subheadline)
+                .foregroundColor(.gray)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 50)
+    }
+    
+    private var filteredItemsView: some View {
+        ForEach(filteredItems) { item in
+            switch item {
+            case .dateSeparator(let text):
+                DateSeparatorView(text: text)
+                    .background(
+                        GeometryReader { geo -> Color in
+                            let frame = geo.frame(in: .global)
+                            DispatchQueue.main.async {
+                                dateSeparatorPositions[text] = frame.minY
+                            }
+                            return Color.clear
+                        }
+                    )
+            case .note(let note):
+                NavigationLink(
+                    destination: NoteView(note: note),
+                    isActive: Binding(
+                        get: { selectedNote?.id == note.id && showNoteDetail },
+                        set: { newValue in
+                            if !newValue {
+                                showNoteDetail = false
+                                if selectedNote?.id == note.id {
+                                    selectedNote = nil
+                                }
+                            }
+                        }
+                    )
+                ) {
+                    NoteCardView(note: note)
+                        .contentShape(Rectangle()) // Make entire area tappable
+                }
+                .simultaneousGesture(TapGesture().onEnded {
+                    selectedNote = note
+                    showNoteDetail = true
+                })
+                .buttonStyle(PlainButtonStyle()) // Prevent default button styling
+            }
+        }
+    }
+    
+    private var headerView: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("My Notes")
+                .font(.system(size: largeScrollableTitleFontSize, weight: .bold))
+                .foregroundColor(Color(.label))
+                .padding(.top, safeAreaTop + 20)
+                .padding(.horizontal)
+                .opacity(headerOpacity)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    GeometryReader { geo -> Color in
+                        DispatchQueue.main.async {
+                            headerHeight = geo.size.height
+                        }
+                        return Color.clear
+                    }
+                )
+            
+            Spacer()
+        }
+        .frame(height: headerHeight)
+        .frame(maxWidth: .infinity)
+        .offset(y: calculateTitleOffset())
+        .background(Color(.systemGray6))
+        .zIndex(3)
+    }
+    
+    private var stickyDateSeparatorView: some View {
+        Group {
+            if headerOpacity <= 0.01 && !currentDateSeparator.isEmpty {
+                VStack(spacing: 0) {
+                    // Add extra spacing to avoid navbar overlap
+                    Color.clear
+                        .frame(height: safeAreaTop + navBarHeight + 8)
+                    
+                    HStack {
+                        Text(currentDateSeparator)
+                            .font(.headline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(Color(.darkGray))
+                            .padding(.horizontal)
+                            .padding(.vertical, 6)
+                        
+                        Spacer()
+                    }
+                    .frame(height: dateSeparatorHeight)
+                    .frame(maxWidth: .infinity)
+                    .background(Color(.systemGray6))
+                    .shadow(color: Color.black.opacity(0.05), radius: 2, x: 0, y: 1)
+                    .transition(.opacity)
+                    .id(currentDateSeparator) // Forces view recreation on change
+                    
+                    Spacer()
+                }
+                .frame(maxHeight: .infinity, alignment: .top)
+                .zIndex(2)
+                .animation(.easeInOut(duration: 0.2), value: currentDateSeparator)
+            }
+        }
+    }
+    
+    private var navbarTitleView: some View {
+        Text("My Notes")
+            .font(.headline)
+            .fontWeight(.semibold)
+            .opacity(navBarTitleOpacity)
+            .animation(.easeInOut(duration: 0.2), value: scrollOffset)
+    }
+    
+    private var newNoteButton: some View {
+        VStack {
+            Spacer()
+            
+            HStack {
+                Spacer()
+                
+                Button(action: {
+                    showRecordingSheet = true
+                    noteTitle = "New note"
+                    noteDescription = "Feel free to write notes here"
+                    startRecording()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 16))
+                        Text("New")
+                            .font(.system(size: 16, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 35)
+                    .padding(.vertical, 20)
+                    .background(Color(red: 0.06, green: 0.54, blue: 0.42))
+                    .cornerRadius(30)
+                    .shadow(color: Color.black.opacity(0.2), radius: 5, x: 0, y: 2)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+            }
+        }
+    }
+    
+    private var recordingBottomSheet: some View {
+        BottomSheet(
+            isPresented: $showRecordingSheet,
+            title: $noteTitle,
+            description: $noteDescription,
+            isRecording: $isRecording,
+            isPaused: $isPaused,
+            recordingDuration: $recordingDuration,
+            waveformHeights: $waveformHeights,
+            onClose: {
+                stopRecording()
+            },
+            onPauseResume: {
+                if isPaused {
+                    resumeRecording()
+                } else {
+                    pauseRecording()
+                }
+            },
+            onUpdateTitle: { newValue in
+                updateLiveActivityTitle(newValue)
+            }
+        ) {
+            // Navigation button to create new note and navigate to it
+            Button(action: {
+                // First stop recording
+                stopRecording()
+                
+                // Create a new note
+                let newNote = createNewNote()
+                
+                // Add the new note to display items
+                addNoteToDisplayItems(newNote)
+                
+                // Close sheet and navigate to note
+                showRecordingSheet = false
+                selectedNote = newNote
+                showNoteDetail = true
+            }) {
+                Text("Create Note")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color(red: 0.06, green: 0.54, blue: 0.42))
+                    .cornerRadius(20)
+                    .shadow(color: Color.black.opacity(0.1), radius: 3, x: 0, y: 1)
+            }
+            .padding(.top, 10)
+        }
+    }
+    
+    // MARK: - Helper Functions
+    
+    private func createNewNote() -> NoteItem {
+        return NoteItem(
+            title: noteTitle,
+            date: Date(),
+            iconName: "doc.text.fill",
+            isCustomIcon: false,
+            dateString: NoteDataProvider.timeFormatter.string(from: Date())
+        )
+    }
+    
+    private func addNoteToDisplayItems(_ note: NoteItem) {
+        var updatedItems = displayItems
+        
+        // Find today's separator or create it
+        let todaySeparator = "Today"
+        let hasTodaySeparator = updatedItems.contains { item in
+            if case .dateSeparator(let text) = item, text == todaySeparator {
+                return true
+            }
+            return false
+        }
+        
+        if !hasTodaySeparator {
+            // If no today separator exists, add it at the beginning
+            updatedItems.insert(.dateSeparator(todaySeparator), at: 0)
+        }
+        
+        // Find the index after "Today" separator to insert the new note
+        if let index = updatedItems.firstIndex(where: { item in
+            if case .dateSeparator(let text) = item, text == todaySeparator {
+                return true
+            }
+            return false
+        }) {
+            // Insert the new note right after the "Today" separator
+            updatedItems.insert(.note(note), at: index + 1)
+        } else {
+            // Fallback (shouldn't happen if we just added it)
+            updatedItems.insert(.note(note), at: 0)
+        }
+        
+        displayItems = updatedItems
+    }
+    
     private var navBarHeight: CGFloat {
         return 44 // Standard navbar height
+    }
+    
+    private func setUpSafeAreaTop() {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first {
+            safeAreaTop = window.safeAreaInsets.top
+        }
     }
     
     private func updateCurrentDateSeparator() {
@@ -538,4 +685,3 @@ struct ContentView: View {
 #Preview {
     ContentView()
 }
-
